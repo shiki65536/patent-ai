@@ -198,15 +198,6 @@ Example:
 - `0.5–0.7`: Review recommended
 - `<0.5`: Manual translation advised
 
----
-
-## 🧪 Testing
-
-```bash
-pytest
-pytest --cov=app
-```
-
 Quality checks:
 
 ```bash
@@ -231,11 +222,6 @@ curl -X POST http://localhost:8000/api/v1/translate \
 
 ## 🧠 Design Notes
 
-- RAG quality matters more than model size
-- Historical translations outperform static glossaries
-- Deterministic LLM behavior is critical for legal workflows
-- Section-level processing improves both quality and traceability
-
 This system is **not intended to replace human translators**, but to:
 
 - Reduce cognitive load
@@ -251,7 +237,6 @@ This system is **not intended to replace human translators**, but to:
 
 ---
 
-## 📬 Contact
+## 📬 Contactgia
 
 Built by **Shiki Wen**
-If you’re working on RAG, LLM tooling, or domain translation systems, feel free to reach out or open an issue.
