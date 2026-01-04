@@ -1,0 +1,29 @@
+# Render Blueprint for patent-ai deployment
+services:
+  - type: web
+    name: patent-ai-api
+    env: python
+    region: singapore # Closest to Australia
+    plan: free # Free tier
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false # Set manually in Render dashboard
+      - key: DATABASE_URL
+        sync: false # Will use Supabase URL
+      - key: SECRET_KEY
+        generateValue: true # Auto-generate
+      - key: API_TITLE
+        value: Patent AI Code Review
+      - key: API_VERSION
+        value: 1.0.0
+      - key: API_PREFIX
+        value: /api/v1
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-5-20250929
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 10
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /api/v1/health
