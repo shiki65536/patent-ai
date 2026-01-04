@@ -1,0 +1,103 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.cover
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =========================
+# Virtual environments
+# =========================
+venv/
+.venv/
+env/
+ENV/
+.tox/
+.venv_rag
+
+# =========================
+# Environment variables
+# =========================
+.env
+.env.*
+!.env.example
+.env.local
+.env.supabase
+
+# =========================
+# Databases
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+test.db
+patent_review.db
+
+# =========================
+# Pytest
+# =========================
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+nosetests.xml
+tests/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Build / Distribution
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# FastAPI / Uvicorn
+# =========================
+*.pid
+
+# =========================
+# Temporary / Scratch
+# =========================
+tmp/
+temp/
+
+# =========================
+# Patent data
+# =========================
+data/
+
+# =========================
+# reamMe for Dev
+# =========================
+dev.md
+user.md
