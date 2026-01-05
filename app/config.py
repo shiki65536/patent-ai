@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "secret-key-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    API_SECRET: str = ""
+
+    # Rate Limiting
+    RATE_LIMIT_PER_HOUR: int = 10
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 10

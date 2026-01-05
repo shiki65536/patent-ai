@@ -206,7 +206,9 @@ python scripts/test_translation_quality.py
 
 ---
 
-## 🌐 API Example
+## 🌐 API Usage
+
+### Basic Request (No Auth)
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/translate \
@@ -216,6 +218,90 @@ curl -X POST http://localhost:8000/api/v1/translate \
     "domain": "semiconductor",
     "use_rag": true
   }'
+```
+
+### Public Endpoints (Always Available)
+
+- `GET /api/v1/health` - Health check
+- `GET /api/v1/system/status` - System statistics
+
+## 🔒 Authentication & Rate Limiting
+
+### Configuration
+
+The system supports optional API key authentication and automatic rate limiting.
+
+#### Development Mode (No Authentication)
+
+```bash
+# .env
+API_SECRET=
+RATE_LIMIT_PER_HOUR=10
+```
+
+All endpoints are publicly accessible. Good for local testing.
+
+#### Production Mode (With Authentication)
+
+```bash
+# .env
+API_SECRET=<SECRET_KEY>
+RATE_LIMIT_PER_HOUR=10
+```
+
+Protected endpoints require `x-api-key` header:
+
+```bash
+curl -X POST https://patent-ai-api.onrender.com/api/v1/translate \
+  -H <SECRET_KEY> \
+  -H "Content-Type: application/json" \
+  -d '{
+    "japanese_text": "半導体装置の製造方法",
+    "domain": "semiconductor",
+    "use_rag": true
+  }'
+```
+
+### Protected Endpoints
+
+When `API_SECRET` is set, these endpoints require authentication:
+
+- `POST /api/v1/translate` - Translation service
+- `POST /api/v1/translate/test-rag` - RAG testing
+- `POST /api/v1/translate/batch` - Batch translation
+
+### Rate Limits
+
+Default: **10 requests per hour per IP address**
+
+Requests exceeding the limit receive `429 Too Many Requests`:
+
+```json
+{
+  "detail": "Rate limit exceeded: 100 requests per hour"
+}
+```
+
+Customize in `.env`:
+
+```bash
+RATE_LIMIT_PER_HOUR=200  # Increase to 200 requests/hour
+```
+
+### Error Responses
+
+| Status Code                 | Description                 |
+| --------------------------- | --------------------------- |
+| `401 Unauthorized`          | Missing or invalid API key  |
+| `429 Too Many Requests`     | Rate limit exceeded         |
+| `500 Internal Server Error` | Translation or system error |
+
+**Example error response:**
+
+```json
+{
+  "detail": "Invalid API key. Add 'x-api-key' header with correct value."
+}
 ```
 
 ---
