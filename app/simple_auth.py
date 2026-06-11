@@ -1,60 +1,90 @@
 """
-Simple Authentication + Rate Limiting
+Simple Authentication + Rate Limiting + Demo Cost Guardrails.
 
-Checks two things:
-1. API key matches the secret in .env
-2. Client IP hasn't exceeded rate limit
+This is intentionally lightweight because the AWS demo runs on Lambda container.
+For a public production app, move rate/cost accounting to DynamoDB or API Gateway usage plans.
 """
-from fastapi import Request, HTTPException
-from datetime import datetime
 from collections import defaultdict
+from datetime import date, datetime
+
+from fastapi import HTTPException, Request
+
 from app.config import settings
 
-# In-memory storage for rate limiting
-# Format: {client_ip: [timestamp1, timestamp2, ...]}
 request_history = defaultdict(list)
+_daily_usage = {
+    "date": str(date.today()),
+    "estimated_cost_usd": 0.0,
+}
 
 
 def check_auth_and_rate_limit(request: Request):
-    """
-    Validate API key and enforce rate limits
-    
-    Raises:
-        HTTPException: 401 if invalid API key, 429 if rate limit exceeded
-    """
-    
-    # ===== Authentication Check =====
-    # Get API key from header
     api_key = request.headers.get("x-api-key", "")
-    
-    # Verify against secret (if configured)
-    if settings.API_SECRET:  # Only check if API_SECRET is set
-        if api_key != settings.API_SECRET:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid API key. Add 'x-api-key' header with correct value."
-            )
-    
-    # ===== Rate Limit Check =====
-    # Get client IP address
+
+    if settings.API_SECRET and api_key != settings.API_SECRET:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key. Add 'x-api-key' header with correct value.",
+        )
+
     client_ip = request.client.host if request.client else "unknown"
-    
-    # Get request history for this IP
     now = datetime.now()
     history = request_history[client_ip]
-    
-    # Clean up requests older than 1 hour
+
     history[:] = [
-        timestamp for timestamp in history 
+        timestamp for timestamp in history
         if (now - timestamp).total_seconds() < 3600
     ]
-    
-    # Check if limit exceeded
+
     if len(history) >= settings.RATE_LIMIT_PER_HOUR:
         raise HTTPException(
             status_code=429,
-            detail=f"Rate limit exceeded: {settings.RATE_LIMIT_PER_HOUR} requests per hour"
+            detail=f"Rate limit exceeded: {settings.RATE_LIMIT_PER_HOUR} requests per hour",
         )
-    
-    # Record this request
+
     history.append(now)
+
+
+def validate_translation_input(text: str):
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="Japanese text is required")
+
+    if len(text) > settings.MAX_INPUT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input too long. Max {settings.MAX_INPUT_CHARS} characters.",
+        )
+
+
+def assert_provider_allowed(provider: str):
+    if provider == "claude" and settings.DISABLE_CLAUDE:
+        raise HTTPException(
+            status_code=403,
+            detail="Claude is disabled for this public demo. Set DISABLE_CLAUDE=false to enable it.",
+        )
+
+
+def check_daily_cost_limit(next_cost_usd: float):
+    today = str(date.today())
+    if _daily_usage["date"] != today:
+        _daily_usage["date"] = today
+        _daily_usage["estimated_cost_usd"] = 0.0
+
+    if _daily_usage["estimated_cost_usd"] + next_cost_usd > settings.DAILY_COST_LIMIT_USD:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily demo cost limit reached: ${settings.DAILY_COST_LIMIT_USD}",
+        )
+
+
+def record_estimated_cost(cost_usd: float):
+    today = str(date.today())
+    if _daily_usage["date"] != today:
+        _daily_usage["date"] = today
+        _daily_usage["estimated_cost_usd"] = 0.0
+
+    _daily_usage["estimated_cost_usd"] += cost_usd
+
+
+def get_cost_usage():
+    return dict(_daily_usage)

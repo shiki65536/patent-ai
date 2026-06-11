@@ -22,7 +22,7 @@ def batch_translate(input_dir: str, output_dir: str, domain: str):
     print(f"Found {len(pdf_files)} PDF files")
     
     # Import here to avoid circular import
-    from scripts.translate_pdf import PDFTranslator
+    from app.services.translate_pdf import PDFTranslator
     
     translator = PDFTranslator()
     

@@ -21,6 +21,50 @@ ENV/
 .venv_rag
 
 # =========================
+# Terraform
+# =========================
+
+terraform/.terraform/
+
+terraform/.terraform.lock.hcl
+
+terraform/*.tfstate
+terraform/*.tfstate.*
+
+terraform/crash.log
+terraform/crash.*.log
+
+terraform/override.tf
+terraform/override.tf.json
+
+terraform/*_override.tf
+terraform/*_override.tf.json
+
+# =========================
+# AWS
+# =========================
+
+.aws/
+
+# =========================
+# Build Artifacts
+# =========================
+
+build/
+tmp/
+temp/
+
+# =========================
+# Secrets
+# =========================
+
+terraform.tfvars
+terraform/*.tfvars
+
+secrets.json
+credentials.json
+
+# =========================
 # Environment variables
 # =========================
 .env
@@ -101,3 +145,4 @@ data/
 # =========================
 dev.md
 user.md
+deploy_aws.md

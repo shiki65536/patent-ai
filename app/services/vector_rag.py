@@ -1,201 +1,224 @@
 """
-Vector-based RAG with Chroma - All compatibility issues fixed
-"""
-import os
-import sys
+Lambda-friendly vector RAG with Chroma.
 
-# CRITICAL: Disable telemetry BEFORE importing chromadb
+The original local version used sentence-transformers, which pulls PyTorch and makes
+Lambda container images heavy. This version uses a deterministic character n-gram
+hash embedding so the AWS demo can run without model downloads or GPU libraries.
+
+For best results, build the AWS index with:
+    python scripts/build_aws_vector_index.py
+"""
+import hashlib
+import logging
+import math
+import os
+import re
+import shutil
+import warnings
+from pathlib import Path
+from typing import Dict, List, Optional
+
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 os.environ["CHROMA_TELEMETRY"] = "False"
-
-# Suppress Chroma warnings
-import warnings
-warnings.filterwarnings('ignore', category=DeprecationWarning)
-warnings.filterwarnings('ignore', message='.*telemetry.*')
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*telemetry.*")
 
 import chromadb
-from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
+
+from app.config import settings
 from app.models import PatentTranslation
-import logging
 
 logger = logging.getLogger(__name__)
 
+
+class HashEmbedding:
+    """Small deterministic embedding for Japanese patent demo retrieval."""
+
+    def __init__(self, dim: int = 384):
+        self.dim = dim
+
+    def encode(self, text: str) -> list[float]:
+        normalized = self._normalize(text)
+        features = self._features(normalized)
+        vector = [0.0] * self.dim
+
+        for feature in features:
+            digest = hashlib.md5(feature.encode("utf-8")).hexdigest()
+            index = int(digest[:8], 16) % self.dim
+            sign = 1.0 if int(digest[8:10], 16) % 2 == 0 else -1.0
+            vector[index] += sign
+
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm == 0:
+            return vector
+        return [value / norm for value in vector]
+
+    def _normalize(self, text: str) -> str:
+        return re.sub(r"\s+", "", text or "").lower()
+
+    def _features(self, text: str) -> list[str]:
+        if not text:
+            return []
+
+        features: list[str] = []
+        for n in (2, 3, 4):
+            if len(text) >= n:
+                features.extend(text[i:i + n] for i in range(len(text) - n + 1))
+        features.extend(re.findall(r"[A-Za-z0-9_\-]+", text))
+        return features or [text]
+
+
 class VectorRAG:
-    """Vector-based Retrieval Augmented Generation"""
-    
-    def __init__(self, persist_directory: str = "./chroma_db"):
-        """
-        Initialize VectorRAG with Chroma
-        
-        Uses:
-        - Chroma 0.4.22+ (compatible with Pydantic 2)
-        - NumPy <2 (for compatibility)
-        - Telemetry completely disabled
-        """
-        try:
-            # Use new PersistentClient API (Pydantic 2 compatible)
-            self.client = chromadb.PersistentClient(path=persist_directory)
-            
-            # Get or create collection
-            self.collection = self.client.get_or_create_collection(
-                name="patent_translations",
-                metadata={"hnsw:space": "cosine"}
-            )
-            
-            # Initialize embedding model (multilingual)
-            logger.info("Loading multilingual embedding model...")
-            self.embedding_model = SentenceTransformer(
-                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-                device='cpu'  # Force CPU to avoid GPU issues
-            )
-            
-            current_count = self.collection.count()
-            logger.info(f"VectorRAG initialized: {current_count} embeddings in index")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize VectorRAG: {e}")
-            raise
-    
+    """Vector-based Retrieval Augmented Generation using bundled Chroma."""
+
+    def __init__(
+        self,
+        persist_directory: Optional[str] = None,
+        collection_name: Optional[str] = None,
+    ):
+        configured_directory = persist_directory or settings.CHROMA_DB_DIR
+        self.persist_directory = self._prepare_lambda_chroma_dir(configured_directory)
+        self.collection_name = collection_name or settings.CHROMA_COLLECTION_NAME
+        self.embedding_model = HashEmbedding(dim=settings.VECTOR_EMBEDDING_DIM)
+
+        self.client = chromadb.PersistentClient(path=self.persist_directory)
+        self.collection = self.client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        logger.info(
+            "VectorRAG initialized: %s embeddings in %s/%s",
+            self.collection.count(),
+            self.persist_directory,
+            self.collection_name,
+        )
+
+    def _prepare_lambda_chroma_dir(self, configured_directory: str) -> str:
+        """Copy bundled Chroma files to /tmp in Lambda because the image filesystem is read-only."""
+        if not os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            return configured_directory
+
+        source = Path(configured_directory)
+        target = Path("/tmp/aws_chroma_db")
+
+        if target.exists():
+            return str(target)
+
+        if source.exists() and any(source.iterdir()):
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+
+        return str(target)
+
     def add_translation(
         self,
         translation_id: int,
         source_text: str,
         translation_text: str,
-        metadata: Dict
+        metadata: Dict,
     ):
-        """Add translation to vector database"""
-        
-        try:
-            # Create embedding from source text
-            embedding = self.embedding_model.encode(
-                source_text,
-                convert_to_numpy=True,
-                show_progress_bar=False
-            ).tolist()
-            
-            # Prepare metadata (Chroma requires all values to be simple types)
-            safe_metadata = {
-                'translation_id': str(translation_id),
-                'translation': translation_text[:500],
-                'section_type': metadata.get('section_type', '') or '',
-                'domain': metadata.get('domain', '') or '',
-                'patent_id': metadata.get('patent_id', '') or ''
-            }
-            
-            # Add to Chroma
-            self.collection.add(
-                embeddings=[embedding],
-                documents=[source_text[:1000]],  # Store preview
-                metadatas=[safe_metadata],
-                ids=[f"trans_{translation_id}"]
-            )
-            
-        except Exception as e:
-            logger.error(f"Error adding translation {translation_id}: {e}")
-            raise
-    
+        embedding = self.embedding_model.encode(source_text)
+        safe_metadata = {
+            "translation_id": str(translation_id),
+            "translation": (translation_text or "")[:1000],
+            "section_type": metadata.get("section_type", "") or "",
+            "domain": metadata.get("domain", "") or "",
+            "patent_id": metadata.get("patent_id", "") or "",
+        }
+
+        self.collection.upsert(
+            embeddings=[embedding],
+            documents=[(source_text or "")[:1500]],
+            metadatas=[safe_metadata],
+            ids=[f"trans_{translation_id}"],
+        )
+
     def search_similar(
         self,
         query_text: str,
         domain: Optional[str] = None,
         section_type: Optional[str] = None,
-        limit: int = 3
+        limit: int = 3,
     ) -> List[Dict]:
-        """Search for similar translations using vector similarity"""
-        
         try:
-            # Create query embedding
-            query_embedding = self.embedding_model.encode(
-                query_text,
-                convert_to_numpy=True,
-                show_progress_bar=False
-            ).tolist()
-            
-            # Build where filter
+            if self.collection.count() == 0:
+                return []
+
+            query_embedding = self.embedding_model.encode(query_text)
+
             where_filter = {}
             if domain:
-                where_filter['domain'] = domain
-            if section_type:
-                where_filter['section_type'] = section_type
-            
-            # Query Chroma
+                where_filter["domain"] = domain
+            if section_type and section_type != "general":
+                where_filter["section_type"] = section_type
+
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=limit,
-                where=where_filter if where_filter else None
+                where=where_filter if where_filter else None,
             )
-            
-            # Format results
+
             similar_translations = []
-            
-            if results['ids'] and len(results['ids'][0]) > 0:
-                for i in range(len(results['ids'][0])):
-                    similar_translations.append({
-                        'id': int(results['metadatas'][0][i]['translation_id']),
-                        'source_text': results['documents'][0][i],
-                        'translation': results['metadatas'][0][i]['translation'],
-                        'similarity_score': 1 - results['distances'][0][i],
-                        'domain': results['metadatas'][0][i]['domain'],
-                        'section_type': results['metadatas'][0][i]['section_type']
-                    })
-            
-            return similar_translations
-            
-        except Exception as e:
-            logger.error(f"Error searching similar translations: {e}")
-            return []
-    
-    def build_index_from_db(self, db: Session, batch_size: int = 100):
-        """Build vector index from existing database translations"""
-        
-        logger.info("Building vector index from database...")
-        
-        # Get total count
-        total = db.query(PatentTranslation).count()
-        logger.info(f"Found {total} translations to index")
-        
-        if total == 0:
-            logger.warning("No translations in database to index!")
-            return 0
-        
-        # Process in batches
-        indexed = 0
-        offset = 0
-        errors = 0
-        
-        while offset < total:
-            batch = db.query(PatentTranslation).offset(offset).limit(batch_size).all()
-            
-            for translation in batch:
+            ids = results.get("ids") or [[]]
+            documents = results.get("documents") or [[]]
+            metadatas = results.get("metadatas") or [[]]
+            distances = results.get("distances") or [[]]
+
+            for index in range(len(ids[0])):
+                metadata = metadatas[0][index] or {}
+                distance = distances[0][index] if distances and distances[0] else None
+                similarity = 1 - distance if isinstance(distance, (int, float)) else None
+
                 try:
-                    # Skip if already indexed
-                    existing = self.collection.get(ids=[f"trans_{translation.id}"])
-                    if existing['ids']:
-                        offset += 1
-                        continue
-                    
-                    self.add_translation(
-                        translation_id=translation.id,
-                        source_text=translation.source_text,
-                        translation_text=translation.translation,
-                        metadata={
-                            'section_type': translation.section_type or '',
-                            'domain': translation.domain or '',
-                            'patent_id': translation.patent_id or ''
-                        }
-                    )
-                    indexed += 1
-                    
-                    if indexed % 50 == 0:
-                        logger.info(f"Indexed {indexed}/{total} translations...")
-                
-                except Exception as e:
-                    logger.error(f"Error indexing translation {translation.id}: {e}")
-                    errors += 1
-            
-            offset += batch_size
-        
-        logger.info(f"✓ Indexing complete: {indexed} new, {errors} errors")
+                    translation_id = int(metadata.get("translation_id", 0))
+                except Exception:
+                    translation_id = 0
+
+                source_text = documents[0][index] or ""
+                translation_text = metadata.get("translation", "") or ""
+
+                query_len = len(query_text.strip())
+                source_len = len(source_text.strip())
+
+                if query_len < 120 and source_len > 500:
+                    continue
+
+                similar_translations.append({
+                    "id": translation_id,
+                    "source_text": source_text[:300].rstrip(),
+                    "translation": translation_text[:300].rstrip(),
+                    "similarity_score": similarity,
+                    "domain": metadata.get("domain", ""),
+                    "section_type": metadata.get("section_type", ""),
+                })
+
+            return similar_translations
+        except Exception as exc:
+            logger.error("Error searching vector index: %s", exc)
+            return []
+
+    def build_index_from_db(self, db: Session, batch_size: int = 100):
+        total = db.query(PatentTranslation).count()
+        logger.info("Building vector index from %s database translations", total)
+
+        indexed = 0
+        for offset in range(0, total, batch_size):
+            batch = db.query(PatentTranslation).offset(offset).limit(batch_size).all()
+            for translation in batch:
+                self.add_translation(
+                    translation_id=translation.id,
+                    source_text=translation.source_text,
+                    translation_text=translation.translation,
+                    metadata={
+                        "section_type": translation.section_type or "",
+                        "domain": translation.domain or "",
+                        "patent_id": translation.patent_id or "",
+                    },
+                )
+                indexed += 1
+
+        logger.info("AWS vector index complete: %s translations indexed", indexed)
         return indexed

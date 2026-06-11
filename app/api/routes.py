@@ -15,7 +15,12 @@ from sqlalchemy import func
 from app.services.translation_rag import TranslationRAG
 
 # Import auth function
-from app.simple_auth import check_auth_and_rate_limit
+from app.simple_auth import (
+    assert_provider_allowed,
+    check_auth_and_rate_limit,
+    get_cost_usage,
+    validate_translation_input,
+)
 
 router = APIRouter()
 
@@ -38,7 +43,7 @@ async def health_check():
         "status": "healthy",
         "service": "patent-translation-ai",
         "version": "1.0.0",
-        "features": ["translation", "rag", "terminology"]
+        "features": ["translation", "rag", "terminology", "serverless-ready"]
     }
 
 
@@ -109,8 +114,12 @@ async def translate_patent(
     - **use_rag**: Enable RAG retrieval (default: True)
     - **num_examples**: Number of examples to retrieve (default: 3)
     """
-    # Check authentication and rate limit
+    # Check authentication, rate limit, input size, and provider guardrails
     check_auth_and_rate_limit(req)
+    validate_translation_input(request.japanese_text)
+    selected_provider = (request.provider or "").lower()
+    if selected_provider:
+        assert_provider_allowed(selected_provider)
     
     start_time = time.time()
     if PROM_ENABLED:
@@ -147,6 +156,7 @@ async def test_rag_only(
     """
     # Check authentication and rate limit
     check_auth_and_rate_limit(req)
+    validate_translation_input(request.japanese_text)
     
     rag = TranslationRAG()
     term_manager = TerminologyManager()
@@ -367,3 +377,8 @@ async def get_stats(db: Session = Depends(get_db)):
         "total_terminology_entries": total_terms,
         "translations_by_domain": {d: c for d, c in domains if d}
     }
+
+@router.get("/cost/status")
+async def cost_status():
+    """Public demo cost guardrail status."""
+    return get_cost_usage()

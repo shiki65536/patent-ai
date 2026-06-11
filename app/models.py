@@ -53,7 +53,7 @@ class PatentTranslationOut(BaseModel):
     confidence_score: Optional[float] = None
     terminology_matches: int = 0
     file_name: Optional[str] = None
-    retrieved_examples: Optional[dict] = None
+    retrieved_examples: Optional[list] = None
     created_at: datetime
     translated_by: str
 
@@ -89,6 +89,7 @@ class TranslationRequest(BaseModel):
     file_name: Optional[str] = None
     use_rag: bool = True  # Use RAG retrieval
     num_examples: int = 3  # Number of examples to retrieve
+    provider: Optional[str] = None  # gemini or claude; defaults to LLM_PROVIDER
 
 class TranslationResponse(BaseModel):
     """Response with translation"""

@@ -1,0 +1,14 @@
+.git
+__pycache__
+*.pyc
+.DS_Store
+.env
+.env.local
+.env.supabase
+.venv
+.venv_rag
+rag-env
+node_modules
+frontend/node_modules
+chroma_db
+*.zip
