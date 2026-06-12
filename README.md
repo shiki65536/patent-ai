@@ -3,7 +3,7 @@
 A **RAG-powered Japanese → Traditional Chinese patent translation system** built on Claude, Gemini, optimized for technical accuracy, terminology consistency, and long-form legal documents.
 
 Built to explore how retrieval and domain knowledge can improve technical translation quality while maintaining consistency, observability, and cost control.
-![framework](https://i.imgur.com/fkaLjTB.png)
+![framework](https://i.imgur.com/l5WKs81.png)
 
 ---
 
